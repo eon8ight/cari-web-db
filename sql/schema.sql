@@ -58,7 +58,7 @@ create table if not exists tb_media (
     preview_image_url text,
     label             text,
     description       text,
-    creator           integer references tb_media_creator ( media_creator ),
+    media_creator     integer references tb_media_creator,
     year              integer
 );
 
