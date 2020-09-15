@@ -10,10 +10,10 @@ create table tb_aesthetic (
     description text       not null
 );
 
-create sequence if not exists sq_pk_aesthetic_relationship;
+create sequence sq_pk_aesthetic_relationship;
 
 -- description describes to_aesthetic's relation to from_aesthetic
-create table if not exists tb_aesthetic_relationship (
+create table tb_aesthetic_relationship (
     aesthetic_relationship integer primary key default nextval( 'sq_pk_aesthetic_relationship'::regclass ),
     from_aesthetic         integer not null references tb_aesthetic ( aesthetic ),
     to_aesthetic           integer not null references tb_aesthetic ( aesthetic ),
