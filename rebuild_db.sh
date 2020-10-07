@@ -54,13 +54,3 @@ schema_files=(
 for schema_file in "${schema_files[@]}"; do
     psql -U "$user" -d "$database" -h "$host" -p "$port" -f "$basedir/schema/$schema_file" -1
 done
-
-data_files=(
-    'aesthetic.sql'
-    'media.sql'
-    'website.sql'
-)
-
-for data_file in "${data_files[@]}"; do
-    psql -U "$user" -d "$database" -h "$host" -p "$port" -f "$basedir/data/$data_file" -1
-done

@@ -4,7 +4,7 @@ create table tb_aesthetic (
     aesthetic   integer    primary key default nextval( 'sq_pk_aesthetic'::regclass ),
     name        text       not null unique,
     url_slug    text       not null unique,
-    symbol      varchar(3) not null unique,
+    symbol      varchar(3) unique,
     start_year  integer    not null,
     end_year    integer,
     description text       not null
