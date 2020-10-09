@@ -1,13 +1,14 @@
 create sequence sq_pk_aesthetic;
 
 create table tb_aesthetic (
-    aesthetic   integer    primary key default nextval( 'sq_pk_aesthetic'::regclass ),
-    name        text       not null unique,
-    url_slug    text       not null unique,
-    symbol      varchar(3) unique,
-    start_year  integer    not null,
-    end_year    integer,
-    description text       not null
+    aesthetic        integer    primary key default nextval( 'sq_pk_aesthetic'::regclass ),
+    name             text       not null unique,
+    url_slug         text       not null unique,
+    symbol           varchar(3) unique,
+    start_year       integer    not null,
+    end_year         integer,
+    description      text       not null,
+    media_source_url text
 );
 
 create sequence sq_pk_aesthetic_relationship;

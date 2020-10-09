@@ -13,13 +13,15 @@ insert into tb_aesthetic (
     url_slug,
     start_year,
     end_year,
-    description
+    description,
+    media_source_url
 ) values (
     %(name)s,
     %(url_slug)s,
     %(start_year)s,
     %(end_year)s,
-    %(description)s
+    %(description)s,
+    %(media_source_url)s
 ) returning aesthetic
 '''
 
@@ -83,6 +85,8 @@ def query(db_handle, query, **kwargs):
 
     return rval
 
+def comma_split(value):
+    return list(filter(lambda v: v != '', map(lambda v: v.strip(), value.split(','))))
 
 def parse_csv_row(row, headers):
     rval = {}
@@ -92,8 +96,25 @@ def parse_csv_row(row, headers):
 
     rval['websites'] = []
 
-    for key in ('website_arena', 'website_facebook', 'website_twitter', 'website_tumblr'):
-        websites = list(map(lambda v: v.strip(), row[headers[key]].split(',')))
+    websites_arena = comma_split(row[headers['website_arena']])
+    media_source_url = None
+
+    if websites_arena:
+        arena_slug = websites_arena[0].split(
+            '/').pop()
+
+        media_source_url = 'https://api.are.na/v2/channels/' + arena_slug
+
+        for website_arena in websites_arena:
+            rval['websites'].append({
+                'url': website_arena,
+                'website_type_label': 'arena'
+            })
+
+    rval['media_source_url'] = media_source_url
+
+    for key in ('website_facebook', 'website_twitter', 'website_tumblr'):
+        websites = comma_split(row[headers[key]])
 
         for website in websites:
             if website:
@@ -105,9 +126,7 @@ def parse_csv_row(row, headers):
                 })
 
     rval['aesthetic_relationships'] = {}
-
-    aesthetic_relationships = list(map(
-        lambda a: a.strip(), row[headers['similar_aesthetics']].split(',')))
+    aesthetic_relationships = comma_split(row[headers['similar_aesthetics']])
 
     for aesthetic_relationship in aesthetic_relationships:
         aesthetic_relationship_match = re.match(
@@ -163,6 +182,7 @@ def main(host, username, dbname, port, password, datafile):
             'start_year': parsed_row['start_year'],
             'end_year': parsed_row['end_year'],
             'description': parsed_row['description'],
+            'media_source_url': parsed_row['media_source_url'],
         }
 
         pk_aesthetic = query(
