@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import csv
+from openpyxl import load_workbook
 import re
 
 import click
@@ -75,6 +75,47 @@ insert into tb_aesthetic_relationship as ar (
 returning aesthetic_relationship
 '''
 
+INSERT_MEDIA_CREATOR_QUERY = '''
+insert into tb_media_creator (
+    name
+) values (
+    %(name)s
+)
+returning media_creator
+'''
+
+
+INSERT_MEDIA_QUERY = '''
+with tt_media as (
+    insert into tb_media (
+        url,
+        preview_image_url,
+        label,
+        description,
+        media_creator,
+        year
+    ) values (
+        %(url)s,
+        %(preview_image_url)s,
+        %(label)s,
+        %(description)s,
+        %(media_creator)s,
+        %(year)s
+    )
+    returning media
+)
+insert into tb_aesthetic_media (
+    aesthetic,
+    media
+)
+   select a.aesthetic,
+          ttm.media
+     from tt_media ttm,
+          tb_aesthetic a
+    where a.name = %(aesthetic_name)s
+returning aesthetic_media
+'''
+
 
 def query(db_handle, query, **kwargs):
     rval = []
@@ -85,18 +126,30 @@ def query(db_handle, query, **kwargs):
 
     return rval
 
-def comma_split(value):
-    return list(filter(lambda v: v != '', map(lambda v: v.strip(), value.split(','))))
 
-def parse_csv_row(row, headers):
+def comma_split(value):
+    return list(filter(lambda v: v != '', map(lambda v: v.strip(), value.split(',')))) if value else []
+
+
+def parse_header_row(worksheet):
+    return {
+        col.value: col.col_idx - 1
+        for col in worksheet[1]
+    }
+
+
+def parse_aesthetic_row(cells, headers):
     rval = {}
 
     for key in ('name', 'start_year', 'end_year', 'description'):
-        rval[key] = row[headers[key]]
+        rval[key] = cells[headers[key]].value
+
+    if not rval['description']:
+        rval['description'] = 'No description.'
 
     rval['websites'] = []
 
-    websites_arena = comma_split(row[headers['website_arena']])
+    websites_arena = comma_split(cells[headers['website_arena']].value)
     media_source_url = None
 
     if websites_arena:
@@ -114,7 +167,7 @@ def parse_csv_row(row, headers):
     rval['media_source_url'] = media_source_url
 
     for key in ('website_facebook', 'website_twitter', 'website_tumblr'):
-        websites = comma_split(row[headers[key]])
+        websites = comma_split(cells[headers[key]].value)
 
         for website in websites:
             if website:
@@ -126,7 +179,8 @@ def parse_csv_row(row, headers):
                 })
 
     rval['aesthetic_relationships'] = {}
-    aesthetic_relationships = comma_split(row[headers['similar_aesthetics']])
+    aesthetic_relationships = comma_split(
+        cells[headers['similar_aesthetics']].value)
 
     for aesthetic_relationship in aesthetic_relationships:
         aesthetic_relationship_match = re.match(
@@ -143,38 +197,24 @@ def parse_csv_row(row, headers):
     return rval
 
 
-@click.command()
-@click.option('-h', '--host', default='localhost', help='database server host or socket directory')
-@click.option('-U', '--username', default='cari', help='database user name')
-@click.option('-d', '--dbname', default='cari', help='database name to connect to')
-@click.option('-p', '--port', default='5432', help='database server port')
-@click.option('-W', '--password', help='force password prompt')
-@click.argument('datafile', type=click.File('r'))
-def main(host, username, dbname, port, password, datafile):
-    csv_reader = csv.reader(datafile)
+def parse_media_row(cells, headers):
+    rval = {}
 
-    psql_connection_args = {
-        'dbname': dbname,
-        'user': username,
-        'host': host,
-        'port': port,
-    }
+    rval['aesthetic_name'] = cells[headers['aesthetic']].value
+    rval['media_creator_name'] = cells[headers['creator']].value
 
-    if(password):
-        psql_connection_args['password'] = password
+    for key in ('url', 'preview_image_url', 'label', 'description', 'year'):
+        rval[key] = cells[headers[key]].value
 
-    db_handle = psycopg2.connect(**psql_connection_args)
+    return rval
 
-    header_row = next(csv_reader, None)
-    headers = {
-        header_row[i]: i
-        for i in range(len(header_row))
-    }
 
+def process_aesthetics_sheet(worksheet, db_handle):
+    headers = parse_header_row(worksheet)
     aesthetic_relationships = {}
 
-    for row in csv_reader:
-        parsed_row = parse_csv_row(row, headers)
+    for cells in worksheet.iter_rows(min_row=2):
+        parsed_row = parse_aesthetic_row(cells, headers)
 
         aesthetic_row = {
             'name': parsed_row['name'],
@@ -199,6 +239,70 @@ def main(host, username, dbname, port, password, datafile):
             for (to_aesthetic_name, description) in aesthetic_relationship_list.items():
                 query(db_handle, INSERT_AESTHETIC_RELATIONSHIP_QUERY, from_aesthetic=aesthetic,
                       to_aesthetic_name=to_aesthetic_name, description=description)
+
+
+def process_media_sheet(worksheet, db_handle):
+    headers = parse_header_row(worksheet)
+    media_creators = {}
+
+    for cells in worksheet.iter_rows(min_row=2):
+        parsed_row = parse_media_row(cells, headers)
+
+        media_row = {
+            'aesthetic_name': parsed_row['aesthetic_name'],
+            'url': parsed_row['url'],
+            'preview_image_url': parsed_row['preview_image_url'],
+            'label': parsed_row['label'],
+            'description': parsed_row['description'],
+            'year': parsed_row['year'],
+        }
+
+        creator_name = parsed_row.get('media_creator_name')
+
+        if creator_name:
+            if not media_creators.get(creator_name):
+                media_creators[creator_name] = query(
+                    db_handle, INSERT_MEDIA_CREATOR_QUERY, name=creator_name)[0]['media_creator']
+
+            media_row['media_creator'] = media_creators[creator_name]
+        else:
+            media_row['media_creator'] = None
+
+        query(db_handle, INSERT_MEDIA_QUERY, **media_row)
+
+
+@click.command()
+@click.option('-h', '--host', default='localhost', help='database server host or socket directory')
+@click.option('-U', '--username', default='cari', help='database user name')
+@click.option('-d', '--dbname', default='cari', help='database name to connect to')
+@click.option('-p', '--port', default='5432', help='database server port')
+@click.option('-W', '--password', help='force password prompt')
+@click.argument('datafile', type=click.Path(exists=True))
+def main(host, username, dbname, port, password, datafile):
+    workbook = load_workbook(filename=datafile, data_only=True)
+
+    psql_connection_args = {
+        'dbname': dbname,
+        'user': username,
+        'host': host,
+        'port': port,
+    }
+
+    if(password):
+        psql_connection_args['password'] = password
+
+    db_handle = psycopg2.connect(**psql_connection_args)
+
+    worksheets = {
+        workbook.sheetnames[i]: i
+        for i in range(len(workbook.sheetnames))
+    }
+
+    workbook.active = worksheets['aesthetics']
+    process_aesthetics_sheet(workbook.active, db_handle)
+
+    workbook.active = worksheets['media']
+    process_media_sheet(workbook.active, db_handle)
 
     db_handle.commit()
 
