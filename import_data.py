@@ -49,17 +49,21 @@ returning website
 
 INSERT_AESTHETIC_RELATIONSHIP_QUERY = '''
 with tt_aesthetic_relationship as (
-   select %(from_aesthetic)s as from_aesthetic,
-          aesthetic          as to_aesthetic,
-          %(description)s    as description
-     from tb_aesthetic
-    where name = %(to_aesthetic_name)s
-    union all
-   select aesthetic          as from_aesthetic,
-          %(from_aesthetic)s as to_aesthetic,
-          null               as description
-     from tb_aesthetic
-    where name = %(to_aesthetic_name)s
+    select from_a.aesthetic as from_aesthetic,
+           to_a.aesthetic   as to_aesthetic,
+           %(description)s  as description
+      from tb_aesthetic from_a,
+           tb_aesthetic to_a
+     where from_a.name = %(from_aesthetic_name)s
+       and to_a.name = %(to_aesthetic_name)s
+     union all
+    select to_a.aesthetic          as from_aesthetic,
+           from_a.aesthetic        as to_aesthetic,
+           %(reverse_description)s as description
+      from tb_aesthetic from_a,
+           tb_aesthetic to_a
+     where from_a.name = %(from_aesthetic_name)s
+       and to_a.name = %(to_aesthetic_name)s
 )
 insert into tb_aesthetic_relationship as ar (
     from_aesthetic,
@@ -71,7 +75,7 @@ insert into tb_aesthetic_relationship as ar (
           ttar.description
      from tt_aesthetic_relationship ttar
        on conflict (from_aesthetic, to_aesthetic) do update
-      set description = trim(excluded.description || ' ' || ar.description)
+      set description = trim(excluded.description || '; ' || ar.description)
 returning aesthetic_relationship
 '''
 
@@ -83,7 +87,6 @@ insert into tb_media_creator (
 )
 returning media_creator
 '''
-
 
 INSERT_MEDIA_QUERY = '''
 with tt_media as (
@@ -178,19 +181,6 @@ def parse_aesthetic_row(cells, headers):
                     'website_type_label': website_type[1]
                 })
 
-    rval['aesthetic_relationships'] = {}
-    aesthetic_relationships = comma_split(
-        cells[headers['similar_aesthetics']].value)
-
-    for aesthetic_relationship in aesthetic_relationships:
-        aesthetic_relationship_match = re.match(
-            r'([^()]+)\s*\(([^)]+)\)', aesthetic_relationship)
-
-        if aesthetic_relationship_match:
-            to_aesthetic_name = aesthetic_relationship_match.group(1).strip()
-            description = aesthetic_relationship_match.group(2).strip()
-            rval['aesthetic_relationships'][to_aesthetic_name] = description
-
     rval['url_slug'] = re.sub(r'\s+', '-', re.sub(r'[^a-zA-Z0-9\s]', '', rval['name'],
                                                   re.IGNORECASE)).lower()
 
@@ -209,9 +199,20 @@ def parse_media_row(cells, headers):
     return rval
 
 
+def parse_similarity_row(cells, headers):
+    rval = {}
+
+    rval['from_aesthetic_name'] = cells[headers['from_aesthetic']].value
+    rval['to_aesthetic_name'] = cells[headers['to_aesthetic']].value
+
+    for key in ('description', 'reverse_description'):
+        rval[key] = cells[headers[key]].value
+
+    return rval
+
+
 def process_aesthetics_sheet(worksheet, db_handle):
     headers = parse_header_row(worksheet)
-    aesthetic_relationships = {}
 
     for cells in worksheet.iter_rows(min_row=2):
         parsed_row = parse_aesthetic_row(cells, headers)
@@ -228,20 +229,12 @@ def process_aesthetics_sheet(worksheet, db_handle):
         pk_aesthetic = query(
             db_handle, INSERT_AESTHETIC_QUERY, **aesthetic_row)[0]['aesthetic']
 
-        aesthetic_relationships[pk_aesthetic] = parsed_row['aesthetic_relationships']
-
         for website in parsed_row['websites']:
             query(db_handle, INSERT_WEBSITE_QUERY, **
                   {'aesthetic': pk_aesthetic, **website})
 
-    for (aesthetic, aesthetic_relationship_list) in aesthetic_relationships.items():
-        if aesthetic_relationship_list:
-            for (to_aesthetic_name, description) in aesthetic_relationship_list.items():
-                query(db_handle, INSERT_AESTHETIC_RELATIONSHIP_QUERY, from_aesthetic=aesthetic,
-                      to_aesthetic_name=to_aesthetic_name, description=description)
 
-
-def process_media_sheet(worksheet, db_handle):
+def process_timeline_sheet(worksheet, db_handle):
     headers = parse_header_row(worksheet)
     media_creators = {}
 
@@ -269,6 +262,15 @@ def process_media_sheet(worksheet, db_handle):
             media_row['media_creator'] = None
 
         query(db_handle, INSERT_MEDIA_QUERY, **media_row)
+
+
+def process_similarity_sheet(worksheet, db_handle):
+    headers = parse_header_row(worksheet)
+    aesthetics = {}
+
+    for cells in worksheet.iter_rows(min_row=2):
+        parsed_row = parse_similarity_row(cells, headers)
+        query(db_handle, INSERT_AESTHETIC_RELATIONSHIP_QUERY, **parsed_row)
 
 
 @click.command()
@@ -301,8 +303,11 @@ def main(host, username, dbname, port, password, datafile):
     workbook.active = worksheets['aesthetics']
     process_aesthetics_sheet(workbook.active, db_handle)
 
-    workbook.active = worksheets['media']
-    process_media_sheet(workbook.active, db_handle)
+    workbook.active = worksheets['timeline']
+    process_timeline_sheet(workbook.active, db_handle)
+
+    workbook.active = worksheets['similarity']
+    process_similarity_sheet(workbook.active, db_handle)
 
     db_handle.commit()
 
