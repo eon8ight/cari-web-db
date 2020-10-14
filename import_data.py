@@ -12,14 +12,14 @@ insert into tb_aesthetic (
     name,
     url_slug,
     start_year,
-    end_year,
+    peak_year,
     description,
     media_source_url
 ) values (
     %(name)s,
     %(url_slug)s,
     %(start_year)s,
-    %(end_year)s,
+    %(peak_year)s,
     %(description)s,
     %(media_source_url)s
 ) returning aesthetic
@@ -144,7 +144,7 @@ def parse_header_row(worksheet):
 def parse_aesthetic_row(cells, headers):
     rval = {}
 
-    for key in ('name', 'start_year', 'end_year', 'description'):
+    for key in ('name', 'start_year', 'peak_year', 'description'):
         rval[key] = cells[headers[key]].value
 
     if not rval['description']:
@@ -221,7 +221,7 @@ def process_aesthetics_sheet(worksheet, db_handle):
             'name': parsed_row['name'],
             'url_slug': parsed_row['url_slug'],
             'start_year': parsed_row['start_year'],
-            'end_year': parsed_row['end_year'],
+            'peak_year': parsed_row['peak_year'],
             'description': parsed_row['description'],
             'media_source_url': parsed_row['media_source_url'],
         }
