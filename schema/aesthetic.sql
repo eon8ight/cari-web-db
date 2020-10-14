@@ -5,7 +5,7 @@ create table tb_aesthetic (
     name             text       not null unique,
     url_slug         text       not null unique,
     symbol           varchar(3) unique,
-    start_year       integer    not null,
+    start_year       integer,
     end_year         integer,
     description      text       not null,
     media_source_url text
