@@ -5,16 +5,23 @@ create table tb_media_creator (
     name          text    not null unique
 );
 
+create sequence sq_pk_media_image;
+
+create table tb_media_image (
+    media_image       integer primary key default nextval( 'sq_pk_media_image'::regclass ),
+    url               text not null unique,
+    preview_image_url text not null
+);
+
 create sequence sq_pk_media;
 
 create table tb_media (
-    media             integer primary key default nextval( 'sq_pk_media'::regclass ),
-    url               text not null,
-    preview_image_url text,
-    label             text,
-    description       text,
-    media_creator     integer references tb_media_creator,
-    year              integer
+    media         integer primary key default nextval( 'sq_pk_media'::regclass ),
+    media_image   integer not null references tb_media_image,
+    label         text,
+    description   text,
+    media_creator integer references tb_media_creator,
+    year          integer
 );
 
 create sequence sq_pk_aesthetic_media;

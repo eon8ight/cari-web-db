@@ -1,11 +1,12 @@
 #!/usr/bin/python3
 
-from openpyxl import load_workbook
 import re
+import sys
 
 import click
 import psycopg2
 import psycopg2.extras
+from openpyxl import load_workbook
 
 INSERT_AESTHETIC_QUERY = '''
 insert into tb_aesthetic (
@@ -35,6 +36,9 @@ with tt_website as (
               website_type
          from tb_website_type
         where regexp_replace(label, '[^a-zA-Z0-9]', '', 'g') ilike %(website_type_label)s || '%%'
+           on conflict (url)
+           do update
+          set url = EXCLUDED.url
     returning website
 )
 insert into tb_aesthetic_website as aw (
@@ -44,6 +48,8 @@ insert into tb_aesthetic_website as aw (
    select %(aesthetic)s,
           ttaw.website
      from tt_website ttaw
+       on conflict (aesthetic, website)
+       do nothing
 returning website
 '''
 
@@ -88,18 +94,27 @@ insert into tb_media_creator (
 returning media_creator
 '''
 
+INSERT_MEDIA_IMAGE_QUERY = '''
+insert into tb_media_image (
+    url,
+    preview_image_url
+) values (
+    %(url)s,
+    %(preview_image_url)s
+)
+returning media_image
+'''
+
 INSERT_MEDIA_QUERY = '''
 with tt_media as (
     insert into tb_media (
-        url,
-        preview_image_url,
+        media_image,
         label,
         description,
         media_creator,
         year
     ) values (
-        %(url)s,
-        %(preview_image_url)s,
+        %(media_image)s,
         %(label)s,
         %(description)s,
         %(media_creator)s,
@@ -119,8 +134,14 @@ insert into tb_aesthetic_media (
 returning aesthetic_media
 '''
 
+aesthetic_names = {}
+db_handle = None
+has_error = False
 
-def query(db_handle, query, **kwargs):
+
+def query(query, **kwargs):
+    global db_handle
+
     rval = []
 
     with db_handle.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
@@ -144,11 +165,13 @@ def parse_header_row(worksheet):
 def parse_aesthetic_row(cells, headers):
     rval = {}
 
-    for key in ('name', 'start_year', 'peak_year', 'description'):
-        rval[key] = cells[headers[key]].value
+    for key in ('name', 'description'):
+        raw_value = cells[headers[key]].value
+        rval[key] = str(raw_value).strip() if raw_value else None
 
-    if not rval['description']:
-        rval['description'] = 'No description.'
+    for key in ('start_year', 'peak_year'):
+        raw_value = cells[headers[key]].value
+        rval[key] = int(raw_value) if raw_value else None
 
     rval['websites'] = []
 
@@ -156,7 +179,7 @@ def parse_aesthetic_row(cells, headers):
     media_source_url = None
 
     if websites_arena:
-        arena_slug = websites_arena[0].split(
+        arena_slug = websites_arena[0].strip().split(
             '/').pop()
 
         media_source_url = 'https://api.are.na/v2/channels/' + arena_slug
@@ -181,20 +204,24 @@ def parse_aesthetic_row(cells, headers):
                     'website_type_label': website_type[1]
                 })
 
-    rval['url_slug'] = re.sub(r'\s+', '-', re.sub(r'[^a-zA-Z0-9\s]', '', rval['name'],
+    rval['url_slug'] = re.sub(r'\s+', '-', re.sub(r'[^a-zA-Z0-9-\s]', '', rval['name'],
                                                   re.IGNORECASE)).lower()
 
     return rval
 
 
-def parse_media_row(cells, headers):
+def parse_timeline_row(cells, headers):
     rval = {}
 
     rval['aesthetic_name'] = cells[headers['aesthetic']].value
     rval['media_creator_name'] = cells[headers['creator']].value
 
-    for key in ('url', 'preview_image_url', 'label', 'description', 'year'):
-        rval[key] = cells[headers[key]].value
+    for key in ('url', 'preview_image_url', 'label', 'description'):
+        raw_value = cells[headers[key]].value
+        rval[key] = str(raw_value).strip() if raw_value else None
+
+    year = cells[headers['year']].value
+    rval['year'] = int(year) if year else None
 
     return rval
 
@@ -202,24 +229,78 @@ def parse_media_row(cells, headers):
 def parse_similarity_row(cells, headers):
     rval = {}
 
-    rval['from_aesthetic_name'] = cells[headers['from_aesthetic']].value
-    rval['to_aesthetic_name'] = cells[headers['to_aesthetic']].value
+    raw_from_aesthetic = cells[headers['from_aesthetic']].value
+    raw_to_aesthetic = cells[headers['to_aesthetic']].value
+
+    rval['from_aesthetic_name'] = str(raw_from_aesthetic).strip(
+    ) if raw_from_aesthetic else None
+
+    rval['to_aesthetic_name'] = str(raw_to_aesthetic).strip(
+    ) if raw_to_aesthetic else None
 
     for key in ('description', 'reverse_description'):
-        rval[key] = cells[headers[key]].value
+        raw_value = cells[headers[key]].value
+        rval[key] = str(raw_value).strip() if raw_value else None
 
     return rval
 
 
-def process_aesthetics_sheet(worksheet, db_handle):
+def process_aesthetics_sheet(worksheet):
+    global aesthetic_names, db_handle, has_error
+
     headers = parse_header_row(worksheet)
+    url_slugs = {}
 
     for cells in worksheet.iter_rows(min_row=2):
         parsed_row = parse_aesthetic_row(cells, headers)
+        skip_row = False
+
+        for required_column in ('name', 'description'):
+            if not parsed_row[required_column]:
+                print(
+                    f'ERROR: "{required_column}" is required. (Row: {cells[0].row})')
+
+                skip_row = True
+
+        for int_column in ('start_year', 'peak_year'):
+            int_cell = parsed_row[int_column]
+
+            if int_cell:
+                try:
+                    int(int_cell)
+                except ValueError:
+                    print(
+                        f'ERROR: "{int_column}" must be numeric. (Row: {cells[0].row})')
+
+                    skip_row = True
+
+        name = parsed_row['name']
+
+        if aesthetic_names.get(name):
+            print(
+                f'ERROR: Aesthetic name "{name}" is already in use. (Row: {cells[0].row})')
+
+            skip_row = True
+        else:
+            aesthetic_names[name] = True
+
+        url_slug = parsed_row['url_slug']
+
+        if url_slugs.get(url_slug):
+            print(
+                f'ERROR: URL slug "{url_slug}" is already in use. (Row: {cells[0].row})')
+
+            skip_row = True
+        else:
+            url_slugs[url_slug] = True
+
+        if skip_row:
+            has_error = True
+            continue
 
         aesthetic_row = {
-            'name': parsed_row['name'],
-            'url_slug': parsed_row['url_slug'],
+            'name': name,
+            'url_slug': url_slug,
             'start_year': parsed_row['start_year'],
             'peak_year': parsed_row['peak_year'],
             'description': parsed_row['description'],
@@ -227,50 +308,131 @@ def process_aesthetics_sheet(worksheet, db_handle):
         }
 
         pk_aesthetic = query(
-            db_handle, INSERT_AESTHETIC_QUERY, **aesthetic_row)[0]['aesthetic']
+            INSERT_AESTHETIC_QUERY, **aesthetic_row)[0]['aesthetic']
 
         for website in parsed_row['websites']:
-            query(db_handle, INSERT_WEBSITE_QUERY, **
+            query(INSERT_WEBSITE_QUERY, **
                   {'aesthetic': pk_aesthetic, **website})
 
 
-def process_timeline_sheet(worksheet, db_handle):
+def process_timeline_sheet(worksheet):
+    global aesthetic_names, db_handle
+
     headers = parse_header_row(worksheet)
     media_creators = {}
+    media_images = {}
 
     for cells in worksheet.iter_rows(min_row=2):
-        parsed_row = parse_media_row(cells, headers)
+        parsed_row = parse_timeline_row(cells, headers)
+        skip_row = False
 
-        media_row = {
-            'aesthetic_name': parsed_row['aesthetic_name'],
-            'url': parsed_row['url'],
-            'preview_image_url': parsed_row['preview_image_url'],
-            'label': parsed_row['label'],
-            'description': parsed_row['description'],
-            'year': parsed_row['year'],
-        }
+        for required_column in ('aesthetic_name', 'url', 'preview_image_url', 'label', 'description', 'year'):
+            if not parsed_row[required_column]:
+                print(
+                    f'ERROR: "{required_column}" is required. (Row: {cells[0].row})')
+                skip_row = True
+
+        year = parsed_row['year']
+
+        try:
+            int(year)
+        except ValueError:
+            print(f'ERROR: "year" must be numeric. (Row: {cells[0].row})')
+            skip_row = True
+
+        aesthetic_name = parsed_row['aesthetic_name']
+
+        if not aesthetic_names.get(aesthetic_name):
+            print(
+                f'ERROR: Aesthetic "{aesthetic_name}" does not exist. Please check the aesthetics worksheet and try again. (Row: {cells[0].row})')
+
+            skip_row = True
+
+        if skip_row:
+            has_error = True
+            continue
+
+        url = parsed_row['url']
+
+        if not media_images.get(url):
+            media_image_row = {
+                'url': url,
+                'preview_image_url': parsed_row['preview_image_url'],
+            }
+
+            media_images[url] = query(
+                INSERT_MEDIA_IMAGE_QUERY, **media_image_row)[0]['media_image']
 
         creator_name = parsed_row.get('media_creator_name')
 
-        if creator_name:
-            if not media_creators.get(creator_name):
-                media_creators[creator_name] = query(
-                    db_handle, INSERT_MEDIA_CREATOR_QUERY, name=creator_name)[0]['media_creator']
+        if creator_name and not media_creators.get(creator_name):
+            media_creators[creator_name] = query(
+                INSERT_MEDIA_CREATOR_QUERY, name=creator_name)[0]['media_creator']
 
-            media_row['media_creator'] = media_creators[creator_name]
-        else:
-            media_row['media_creator'] = None
+        media_row = {
+            'aesthetic_name': aesthetic_name,
+            'media_image': media_images[url],
+            'label': parsed_row['label'],
+            'description': parsed_row['description'],
+            'media_creator': media_creators[creator_name] if creator_name else None,
+            'year': parsed_row['year'],
+        }
 
-        query(db_handle, INSERT_MEDIA_QUERY, **media_row)
+        query(INSERT_MEDIA_QUERY, **media_row)
 
 
-def process_similarity_sheet(worksheet, db_handle):
+def process_similarity_sheet(worksheet):
+    global aesthetic_names, db_handle
+
     headers = parse_header_row(worksheet)
     aesthetics = {}
+    aesthetic_relationships = {}
 
     for cells in worksheet.iter_rows(min_row=2):
         parsed_row = parse_similarity_row(cells, headers)
-        query(db_handle, INSERT_AESTHETIC_RELATIONSHIP_QUERY, **parsed_row)
+        skip_row = False
+
+        for required_column in ('from_aesthetic_name', 'to_aesthetic_name'):
+            if not parsed_row[required_column]:
+                print(
+                    f'ERROR: "{required_column}" is required. (Row: {cells[0].row})')
+                skip_row = True
+
+        from_aesthetic = parsed_row['from_aesthetic_name']
+        to_aesthetic = parsed_row['to_aesthetic_name']
+
+        if not aesthetic_names.get(from_aesthetic):
+            print(
+                f'ERROR: Aesthetic "{from_aesthetic}" does not exist. Please check the aesthetics worksheet and try again. (Row: {cells[0].row})')
+
+            skip_row = True
+
+        if not aesthetic_names.get(to_aesthetic):
+            print(
+                f'ERROR: Aesthetic "{to_aesthetic}" does not exist. Please check the aesthetics worksheet and try again. (Row: {cells[0].row})')
+
+            skip_row = True
+
+        if aesthetic_relationships.get(from_aesthetic, {}).get(to_aesthetic) or aesthetic_relationships.get(to_aesthetic, {}).get(from_aesthetic):
+            print(
+                f'ERROR: Relationship between "{from_aesthetic}" to "{to_aesthetic}" already defined. (Row: {cells[0].row})')
+
+            skip_row = True
+        else:
+            if not aesthetic_relationships.get(from_aesthetic, {}):
+                aesthetic_relationships[from_aesthetic] = {}
+
+            if not aesthetic_relationships.get(to_aesthetic, {}):
+                aesthetic_relationships[to_aesthetic] = {}
+
+            aesthetic_relationships[from_aesthetic][to_aesthetic] = True
+            aesthetic_relationships[to_aesthetic][from_aesthetic] = True
+
+        if skip_row:
+            has_error = True
+            continue
+
+        query(INSERT_AESTHETIC_RELATIONSHIP_QUERY, **parsed_row)
 
 
 @click.command()
@@ -281,6 +443,8 @@ def process_similarity_sheet(worksheet, db_handle):
 @click.option('-W', '--password', help='force password prompt')
 @click.argument('datafile', type=click.Path(exists=True))
 def main(host, username, dbname, port, password, datafile):
+    global db_handle, has_error
+
     workbook = load_workbook(filename=datafile, data_only=True)
 
     psql_connection_args = {
@@ -300,16 +464,26 @@ def main(host, username, dbname, port, password, datafile):
         for i in range(len(workbook.sheetnames))
     }
 
+    print('Processing aesthetics worksheet...')
     workbook.active = worksheets['aesthetics']
-    process_aesthetics_sheet(workbook.active, db_handle)
+    process_aesthetics_sheet(workbook.active)
 
+    print('Processing timeline worksheet...')
     workbook.active = worksheets['timeline']
-    process_timeline_sheet(workbook.active, db_handle)
+    process_timeline_sheet(workbook.active)
 
+    print('Processing similarity worksheet...')
     workbook.active = worksheets['similarity']
-    process_similarity_sheet(workbook.active, db_handle)
+    process_similarity_sheet(workbook.active)
+
+    if has_error:
+        print('Workbook has errors. Please correct and try again.')
+        db_handle.rollback()
+        sys.exit(-1)
 
     db_handle.commit()
+    print('Done')
+    sys.exit(0)
 
 
 if __name__ == '__main__':
