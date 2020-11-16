@@ -94,42 +94,24 @@ insert into tb_media_creator (
 returning media_creator
 '''
 
-INSERT_MEDIA_IMAGE_QUERY = '''
-insert into tb_media_image (
-    url,
-    preview_image_url
-) values (
-    %(url)s,
-    %(preview_image_url)s
-)
-returning media_image
-'''
-
 INSERT_MEDIA_QUERY = '''
-with tt_media as (
-    insert into tb_media (
-        media_image,
-        label,
-        description,
-        media_creator,
-        year
-    ) values (
-        %(media_image)s,
-        %(label)s,
-        %(description)s,
-        %(media_creator)s,
-        %(year)s
-    )
-    returning media
-)
 insert into tb_aesthetic_media (
     aesthetic,
-    media
+    url,
+    preview_image_url,
+    label,
+    description,
+    media_creator,
+    year
 )
    select a.aesthetic,
-          ttm.media
-     from tt_media ttm,
-          tb_aesthetic a
+          %(url)s,
+          %(preview_image_url)s,
+          %(label)s,
+          %(description)s,
+          %(media_creator)s,
+          %(year)s
+     from tb_aesthetic a
     where a.name = %(aesthetic_name)s
 returning aesthetic_media
 '''
@@ -320,7 +302,6 @@ def process_timeline_sheet(worksheet):
 
     headers = parse_header_row(worksheet)
     media_creators = {}
-    media_images = {}
 
     for cells in worksheet.iter_rows(min_row=2):
         parsed_row = parse_timeline_row(cells, headers)
@@ -352,17 +333,6 @@ def process_timeline_sheet(worksheet):
             has_error = True
             continue
 
-        url = parsed_row['url']
-
-        if not media_images.get(url):
-            media_image_row = {
-                'url': url,
-                'preview_image_url': parsed_row['preview_image_url'],
-            }
-
-            media_images[url] = query(
-                INSERT_MEDIA_IMAGE_QUERY, **media_image_row)[0]['media_image']
-
         creator_name = parsed_row.get('media_creator_name')
 
         if creator_name and not media_creators.get(creator_name):
@@ -371,7 +341,8 @@ def process_timeline_sheet(worksheet):
 
         media_row = {
             'aesthetic_name': aesthetic_name,
-            'media_image': media_images[url],
+            'url': parsed_row['url'],
+            'preview_image_url': parsed_row['preview_image_url'],
             'label': parsed_row['label'],
             'description': parsed_row['description'],
             'media_creator': media_creators[creator_name] if creator_name else None,
