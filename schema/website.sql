@@ -10,19 +10,12 @@ insert into tb_website_type ( website_type, label, validation_regex )
             ( 3, 'Twitter', '^(https?:\/\/)?(www[.])?twitter[.]com\/.+$' ),
             ( 4, 'Tumblr', '^(https?:\/\/)?.+[.]tumblr[.]com\/?' );
 
-create sequence sq_pk_website;
-
-create table tb_website (
-    website      integer primary key default nextval( 'sq_pk_website'::regclass ),
-    url          text    not null unique,
-    website_type integer not null
-);
-
 create sequence sq_pk_aesthetic_website;
 
 create table tb_aesthetic_website (
     aesthetic_website integer primary key default nextval( 'sq_pk_aesthetic_website'::regclass ),
     aesthetic         integer not null references tb_aesthetic,
-    website           integer not null references tb_website,
-    unique ( aesthetic, website )
+    url               text not null,
+    website_type      integer not null references tb_website_type,
+    unique ( aesthetic, url )
 );

@@ -13,44 +13,34 @@ insert into tb_aesthetic (
     name,
     url_slug,
     start_year,
-    peak_year,
+    end_year,
     description,
     media_source_url
 ) values (
     %(name)s,
     %(url_slug)s,
     %(start_year)s,
-    %(peak_year)s,
+    %(end_year)s,
     %(description)s,
     %(media_source_url)s
 ) returning aesthetic
 '''
 
 INSERT_WEBSITE_QUERY = '''
-with tt_website as (
-    insert into tb_website (
-        url,
-        website_type
-    )
-       select %(url)s,
-              website_type
-         from tb_website_type
-        where regexp_replace(label, '[^a-zA-Z0-9]', '', 'g') ilike %(website_type_label)s || '%%'
-           on conflict (url)
-           do update
-          set url = EXCLUDED.url
-    returning website
-)
 insert into tb_aesthetic_website as aw (
     aesthetic,
-    website
+    url,
+    website_type
 )
    select %(aesthetic)s,
-          ttaw.website
-     from tt_website ttaw
-       on conflict (aesthetic, website)
-       do nothing
-returning website
+          %(url)s,
+          wt.website_type
+     from tb_website_type wt
+    where regexp_replace(wt.label, '[^a-zA-Z0-9]', '', 'g') ilike %(website_type_label)s || '%%'
+       on conflict (aesthetic, url)
+       do update
+      set url = EXCLUDED.url
+returning aesthetic_website
 '''
 
 INSERT_AESTHETIC_RELATIONSHIP_QUERY = '''
@@ -81,7 +71,7 @@ insert into tb_aesthetic_relationship as ar (
           ttar.description
      from tt_aesthetic_relationship ttar
        on conflict (from_aesthetic, to_aesthetic) do update
-      set description = trim(excluded.description || '; ' || ar.description)
+      set description = excluded.description
 returning aesthetic_relationship
 '''
 
@@ -119,6 +109,7 @@ returning aesthetic_media
 aesthetic_names = {}
 db_handle = None
 has_error = False
+use_default_values = False
 
 
 def query(query, **kwargs):
@@ -151,9 +142,9 @@ def parse_aesthetic_row(cells, headers):
         raw_value = cells[headers[key]].value
         rval[key] = str(raw_value).strip() if raw_value else None
 
-    for key in ('start_year', 'peak_year'):
+    for key in ('start_year', 'end_year'):
         raw_value = cells[headers[key]].value
-        rval[key] = int(raw_value) if raw_value else None
+        rval[key] = str(raw_value).strip().title() if raw_value else None
 
     rval['websites'] = []
 
@@ -228,7 +219,7 @@ def parse_similarity_row(cells, headers):
 
 
 def process_aesthetics_sheet(worksheet):
-    global aesthetic_names, db_handle, has_error
+    global aesthetic_names, db_handle, has_error, use_default_values
 
     headers = parse_header_row(worksheet)
     url_slugs = {}
@@ -237,24 +228,18 @@ def process_aesthetics_sheet(worksheet):
         parsed_row = parse_aesthetic_row(cells, headers)
         skip_row = False
 
-        for required_column in ('name', 'description'):
-            if not parsed_row[required_column]:
-                print(
-                    f'ERROR: "{required_column}" is required. (Row: {cells[0].row})')
+        if not parsed_row['name']:
+            print(
+                f'ERROR: "name" is required. (Row: {cells[0].row})')
 
+            skip_row = True
+
+        if not parsed_row['description']:
+            if use_default_values:
+                parsed_row['description'] = 'This aesthetic is still being researched. Please check back later!'
+            else:
+                print(f'ERROR: "description" is required. (Row: {cells[0].row})')
                 skip_row = True
-
-        for int_column in ('start_year', 'peak_year'):
-            int_cell = parsed_row[int_column]
-
-            if int_cell:
-                try:
-                    int(int_cell)
-                except ValueError:
-                    print(
-                        f'ERROR: "{int_column}" must be numeric. (Row: {cells[0].row})')
-
-                    skip_row = True
 
         name = parsed_row['name']
 
@@ -284,7 +269,7 @@ def process_aesthetics_sheet(worksheet):
             'name': name,
             'url_slug': url_slug,
             'start_year': parsed_row['start_year'],
-            'peak_year': parsed_row['peak_year'],
+            'end_year': parsed_row['end_year'],
             'description': parsed_row['description'],
             'media_source_url': parsed_row['media_source_url'],
         }
@@ -299,6 +284,9 @@ def process_aesthetics_sheet(worksheet):
 
 def process_timeline_sheet(worksheet):
     global aesthetic_names, db_handle
+
+    if worksheet.min_row < 2:
+        return
 
     headers = parse_header_row(worksheet)
     media_creators = {}
@@ -386,18 +374,16 @@ def process_similarity_sheet(worksheet):
 
         if aesthetic_relationships.get(from_aesthetic, {}).get(to_aesthetic) or aesthetic_relationships.get(to_aesthetic, {}).get(from_aesthetic):
             print(
-                f'ERROR: Relationship between "{from_aesthetic}" to "{to_aesthetic}" already defined. (Row: {cells[0].row})')
+                f'WARNING: Relationship between "{from_aesthetic}" to "{to_aesthetic}" already defined. (Row: {cells[0].row})')
 
-            skip_row = True
-        else:
-            if not aesthetic_relationships.get(from_aesthetic, {}):
-                aesthetic_relationships[from_aesthetic] = {}
+        if not aesthetic_relationships.get(from_aesthetic, {}):
+            aesthetic_relationships[from_aesthetic] = {}
 
-            if not aesthetic_relationships.get(to_aesthetic, {}):
-                aesthetic_relationships[to_aesthetic] = {}
+        if not aesthetic_relationships.get(to_aesthetic, {}):
+            aesthetic_relationships[to_aesthetic] = {}
 
-            aesthetic_relationships[from_aesthetic][to_aesthetic] = True
-            aesthetic_relationships[to_aesthetic][from_aesthetic] = True
+        aesthetic_relationships[from_aesthetic][to_aesthetic] = True
+        aesthetic_relationships[to_aesthetic][from_aesthetic] = True
 
         if skip_row:
             has_error = True
@@ -412,10 +398,12 @@ def process_similarity_sheet(worksheet):
 @click.option('-d', '--dbname', default='cari', help='database name to connect to')
 @click.option('-p', '--port', default='5432', help='database server port')
 @click.option('-W', '--password', help='force password prompt')
+@click.option('--use-defaults', is_flag=True, help='use sensible default values for empty cells where appropriate')
 @click.argument('datafile', type=click.Path(exists=True))
-def main(host, username, dbname, port, password, datafile):
-    global db_handle, has_error
+def main(host, username, dbname, port, password, use_defaults, datafile):
+    global db_handle, has_error, use_default_values
 
+    use_default_values = use_defaults
     workbook = load_workbook(filename=datafile, data_only=True)
 
     psql_connection_args = {
