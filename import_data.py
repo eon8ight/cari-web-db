@@ -144,7 +144,9 @@ def parse_aesthetic_row(cells, headers):
 
     for key in ('start_year', 'end_year'):
         raw_value = cells[headers[key]].value
-        rval[key] = str(raw_value).strip().title() if raw_value else None
+
+        rval[key] = re.sub(r'(\d{4})S$', r'\1s', str(
+            raw_value).strip().title()) if raw_value else None
 
     rval['websites'] = []
 
@@ -238,7 +240,8 @@ def process_aesthetics_sheet(worksheet):
             if use_default_values:
                 parsed_row['description'] = 'This aesthetic is still being researched. Please check back later!'
             else:
-                print(f'ERROR: "description" is required. (Row: {cells[0].row})')
+                print(
+                    f'ERROR: "description" is required. (Row: {cells[0].row})')
                 skip_row = True
 
         name = parsed_row['name']
