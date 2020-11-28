@@ -54,3 +54,7 @@ schema_files=(
 for schema_file in "${schema_files[@]}"; do
     psql -U "$user" -d "$database" -h "$host" -p "$port" -f "$basedir/schema/$schema_file" -1
 done
+
+for function_file in "$basedir"/functions/*.sql; do
+    psql -U "$user" -d "$database" -h "$host" -p "$port" -f "$function_file" -1
+done
