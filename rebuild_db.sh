@@ -49,6 +49,7 @@ schema_files=(
     'aesthetic.sql'
     'media.sql'
     'website.sql'
+    'entity.sql'
 )
 
 for schema_file in "${schema_files[@]}"; do
