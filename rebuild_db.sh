@@ -50,6 +50,7 @@ schema_files=(
     'media.sql'
     'website.sql'
     'entity.sql'
+    'messages.sql'
 )
 
 for schema_file in "${schema_files[@]}"; do
