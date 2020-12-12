@@ -13,7 +13,7 @@ create table tb_entity (
     last_name          text,
     biography          text,
     title              text,
-    profile_image_url  text,
+    profile_image_file integer references tb_file,
     favorite_aesthetic integer references tb_aesthetic
 );
 

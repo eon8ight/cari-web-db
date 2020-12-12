@@ -49,6 +49,7 @@ schema_files=(
     'aesthetic.sql'
     'media.sql'
     'website.sql'
+    'file.sql'
     'entity.sql'
     'messages.sql'
 )
