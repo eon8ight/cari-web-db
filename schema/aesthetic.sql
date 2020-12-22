@@ -28,6 +28,8 @@ insert into tb_era (
          y.year
     from tb_era_specifier es,
          ( values
+           ( 1950 ),
+           ( 1960 ),
            ( 1970 ),
            ( 1980 ),
            ( 1990 ),

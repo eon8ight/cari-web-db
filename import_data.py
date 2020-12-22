@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+from functools import reduce
 import re
 import sys
 
@@ -8,12 +9,39 @@ import psycopg2
 import psycopg2.extras
 from openpyxl import load_workbook
 
+GET_ERA_BY_YEAR_QUERY = '''
+with tt_era as (
+  select e.era,
+         e.year + es.weight as approximate_year
+    from tb_era e
+    join tb_era_specifier es
+      on e.era_specifier = es.era_specifier
+)
+   select distinct on ( s )
+          s,
+          e.era
+     from generate_series(1970, 2029) s
+left join tt_era e
+       on e.approximate_year = s
+       or abs(s - e.approximate_year) <= 1
+ order by s,
+          e.approximate_year desc
+'''
+
+GET_ERA_BY_READABLE_VALUE_QUERY = '''
+select e.era,
+       lower(es.label || ' ' || e.year || 's') as human_readable
+  from tb_era e
+  join tb_era_specifier es
+    on e.era_specifier = es.era_specifier
+'''
+
 INSERT_AESTHETIC_QUERY = '''
 insert into tb_aesthetic (
     name,
     url_slug,
-    start_year,
-    end_year,
+    start_era,
+    end_era,
     description,
     media_source_url
 ) values (
@@ -110,6 +138,32 @@ aesthetic_names = {}
 db_handle = None
 has_error = False
 use_default_values = False
+readable_value_era_table = {}
+year_era_table = {}
+
+
+def build_year_era_table():
+    global db_handle
+
+    year_era_rows = query(GET_ERA_BY_YEAR_QUERY)
+
+    def reducer(table, row):
+        table[str(row['s'])] = row['era']
+        return table
+
+    return reduce(reducer, year_era_rows, {})
+
+
+def build_readable_value_era_table():
+    global db_handle
+
+    readable_value_era_rows = query(GET_ERA_BY_READABLE_VALUE_QUERY)
+
+    def reducer(table, row):
+        table[row['human_readable']] = row['era']
+        return table
+
+    return reduce(reducer, readable_value_era_rows, {})
 
 
 def query(query, **kwargs):
@@ -136,6 +190,7 @@ def parse_header_row(worksheet):
 
 
 def parse_aesthetic_row(cells, headers):
+    global readable_value_era_table, year_era_table
     rval = {}
 
     for key in ('name', 'description'):
@@ -144,9 +199,17 @@ def parse_aesthetic_row(cells, headers):
 
     for key in ('start_year', 'end_year'):
         raw_value = cells[headers[key]].value
+        era = None
 
-        rval[key] = re.sub(r'(\d{4})S$', r'\1s', str(
-            raw_value).strip().title()) if raw_value else None
+        if raw_value:
+            value_key = str(raw_value).strip().lower()
+            era = year_era_table.get(value_key, readable_value_era_table.get(value_key))
+
+            if value_key != 'present' and not era:
+                print(
+                    f'WARNING: Could not parse value "{raw_value}". (Row: {cells[0].row})')
+
+        rval[key] = era
 
     rval['websites'] = []
 
@@ -404,7 +467,7 @@ def process_similarity_sheet(worksheet):
 @click.option('--use-defaults', is_flag=True, help='use sensible default values for empty cells where appropriate')
 @click.argument('datafile', type=click.Path(exists=True))
 def main(host, username, dbname, port, password, use_defaults, datafile):
-    global db_handle, has_error, use_default_values
+    global db_handle, has_error, readable_value_era_table, use_default_values, year_era_table
 
     use_default_values = use_defaults
     workbook = load_workbook(filename=datafile, data_only=True)
@@ -425,6 +488,9 @@ def main(host, username, dbname, port, password, use_defaults, datafile):
         workbook.sheetnames[i]: i
         for i in range(len(workbook.sheetnames))
     }
+
+    year_era_table = build_year_era_table()
+    readable_value_era_table = build_readable_value_era_table()
 
     print('Processing aesthetics worksheet...')
     workbook.active = worksheets['aesthetics']
