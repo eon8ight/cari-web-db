@@ -58,3 +58,6 @@ create table tb_entity_role (
     role        integer not null references tb_role,
     unique ( entity, role )
 );
+
+insert into tb_entity_role ( entity, role )
+     values ( 0, 1 );
