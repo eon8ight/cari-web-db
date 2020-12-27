@@ -17,5 +17,9 @@ create table tb_aesthetic_website (
     aesthetic         integer not null references tb_aesthetic,
     url               text not null,
     website_type      integer not null references tb_website_type,
+    created           timestamp not null default now(),
+    creator           integer not null references tb_entity,
+    modified          timestamp not null default now(),
+    modifier          integer not null references tb_entity
     unique ( aesthetic, url )
 );

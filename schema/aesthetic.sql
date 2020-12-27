@@ -42,14 +42,18 @@ order by y.year, es.era_specifier;
 create sequence sq_pk_aesthetic;
 
 create table tb_aesthetic (
-    aesthetic        integer    primary key default nextval( 'sq_pk_aesthetic'::regclass ),
-    name             text       not null unique,
-    url_slug         text       not null unique,
+    aesthetic        integer primary key default nextval( 'sq_pk_aesthetic'::regclass ),
+    name             text not null unique,
+    url_slug         text not null unique,
     symbol           varchar(3) unique,
-    start_era        integer    references tb_era,
-    end_era          integer    references tb_era,
-    description      text       not null,
-    media_source_url text
+    start_era        integer references tb_era,
+    end_era          integer references tb_era,
+    description      text not null,
+    media_source_url text,
+    created          timestamp not null default now(),
+    creator          integer not null references tb_entity,
+    modified         timestamp not null default now(),
+    modifier         integer not null references tb_entity
 );
 
 create sequence sq_pk_aesthetic_relationship;
@@ -60,5 +64,9 @@ create table tb_aesthetic_relationship (
     from_aesthetic         integer not null references tb_aesthetic ( aesthetic ),
     to_aesthetic           integer not null references tb_aesthetic ( aesthetic ),
     description            text,
+    created                timestamp not null default now(),
+    creator                integer not null references tb_entity,
+    modified               timestamp not null default now(),
+    modifier               integer not null references tb_entity,
     unique ( from_aesthetic, to_aesthetic )
 );

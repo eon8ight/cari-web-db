@@ -17,5 +17,9 @@ create table tb_aesthetic_media (
     description          text,
     media_creator        integer references tb_media_creator,
     year                 integer,
+    created              timestamp not null default now(),
+    creator              integer not null references tb_entity,
+    modified             timestamp not null default now(),
+    modifier             integer not null references tb_entity,
     unique ( aesthetic, media_file )
 );

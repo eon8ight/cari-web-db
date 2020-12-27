@@ -9,9 +9,11 @@ insert into tb_file_type ( file_type, label )
 create sequence sq_pk_file;
 
 create table tb_file (
-    file       integer primary key default nextval( 'sq_pk_file' ),
-    file_type  integer not null references tb_file_type,
-    url        text not null,
-    width      integer,
-    height     integer
+    file      integer primary key default nextval( 'sq_pk_file' ),
+    file_type integer not null references tb_file_type,
+    url       text not null unique,
+    width     integer,
+    height    integer,
+    created   timestamp not null default now(),
+    creator   integer not null references tb_entity
 );
