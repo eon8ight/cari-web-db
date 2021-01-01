@@ -12,8 +12,9 @@ create table tb_file (
     file      integer primary key default nextval( 'sq_pk_file' ),
     file_type integer not null references tb_file_type,
     url       text not null unique,
-    width     integer,
-    height    integer,
     created   timestamp not null default now(),
     creator   integer not null references tb_entity
 );
+
+alter table tb_entity
+    add column profile_image_file integer references tb_file;

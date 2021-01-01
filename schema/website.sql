@@ -20,6 +20,6 @@ create table tb_aesthetic_website (
     created           timestamp not null default now(),
     creator           integer not null references tb_entity,
     modified          timestamp not null default now(),
-    modifier          integer not null references tb_entity
+    modifier          integer not null references tb_entity,
     unique ( aesthetic, url )
 );

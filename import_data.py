@@ -43,14 +43,18 @@ insert into tb_aesthetic (
     start_era,
     end_era,
     description,
-    media_source_url
+    media_source_url,
+    creator,
+    modifier
 ) values (
     %(name)s,
     %(url_slug)s,
     %(start_year)s,
     %(end_year)s,
     %(description)s,
-    %(media_source_url)s
+    %(media_source_url)s,
+    0,
+    0
 ) returning aesthetic
 '''
 
@@ -58,11 +62,15 @@ INSERT_WEBSITE_QUERY = '''
 insert into tb_aesthetic_website as aw (
     aesthetic,
     url,
-    website_type
+    website_type,
+    creator,
+    modifier
 )
    select %(aesthetic)s,
           %(url)s,
-          wt.website_type
+          wt.website_type,
+          0,
+          0
      from tb_website_type wt
     where regexp_replace(wt.label, '[^a-zA-Z0-9]', '', 'g') ilike %(website_type_label)s || '%%'
        on conflict (aesthetic, url)
@@ -92,11 +100,15 @@ with tt_aesthetic_relationship as (
 insert into tb_aesthetic_relationship as ar (
     from_aesthetic,
     to_aesthetic,
-    description
+    description,
+    creator,
+    modifier
 )
    select ttar.from_aesthetic,
           ttar.to_aesthetic,
-          ttar.description
+          ttar.description,
+          0,
+          0
      from tt_aesthetic_relationship ttar
        on conflict (from_aesthetic, to_aesthetic) do update
       set description = excluded.description
@@ -120,7 +132,9 @@ insert into tb_aesthetic_media (
     label,
     description,
     media_creator,
-    year
+    year,
+    creator,
+    modifier
 )
    select a.aesthetic,
           %(url)s,
@@ -128,7 +142,9 @@ insert into tb_aesthetic_media (
           %(label)s,
           %(description)s,
           %(media_creator)s,
-          %(year)s
+          %(year)s,
+          0,
+          0
      from tb_aesthetic a
     where a.name = %(aesthetic_name)s
 returning aesthetic_media

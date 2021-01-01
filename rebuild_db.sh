@@ -46,11 +46,11 @@ psql -U "$user" -d "$database" -h "$host" -p "$port" -c "$cmd_drop"
 basedir=$(dirname "$0")
 
 schema_files=(
+    'entity.sql'
     'aesthetic.sql'
     'file.sql'
     'media.sql'
     'website.sql'
-    'entity.sql'
     'messages.sql'
 )
 

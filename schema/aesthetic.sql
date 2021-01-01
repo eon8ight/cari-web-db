@@ -70,3 +70,6 @@ create table tb_aesthetic_relationship (
     modifier               integer not null references tb_entity,
     unique ( from_aesthetic, to_aesthetic )
 );
+
+alter table tb_entity
+    add column favorite_aesthetic integer references tb_aesthetic;
