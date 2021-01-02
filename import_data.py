@@ -352,7 +352,7 @@ def process_aesthetics_sheet(worksheet):
             'url_slug': url_slug,
             'start_year': parsed_row['start_year'],
             'end_year': parsed_row['end_year'],
-            'description': f'<p>{parsed_row['description']}</p>',
+            'description': f'<p>{parsed_row["description"]}</p>',
             'media_source_url': parsed_row['media_source_url'],
         }
 
